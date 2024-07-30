@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Overview</title>
+<script src="helpers.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels/dist/chartjs-plugin-datalabels.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-trendline"></script>
+
+<style>
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 50px;
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background-color: #f0f0f0;
+  }
+
+  .platform-buttons {
+    display: flex;
+    gap: 50px;
+    margin-bottom: 50px;
+  }
+
+  .platform-buttons button {
+    padding: 15px 30px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    background-color: #808080;
+    color: white;
+    font-size: 18px;
+    transition: background-color 0.3s;
+  }
+
+  .platform-buttons button:hover {
+    background-color: #505050;
+  }
+
+  .row {
+    width: 80%;
+    margin-bottom: 30px;
+  }
+
+  .row-title {
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    border-bottom: 3px double #000;
+    padding-bottom: 5px;
+    text-align: left;
+  }
+
+  .content-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  .number-column {
+    width: 30%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    background-color: #e0e0e0;
+    border-radius: 10px;
+    padding: 20px;
+  }
+
+  .canvas-column canvas {
+    width: 100%;
+    height: 350px;
+    background-color: white;
+    border-radius: 10px;
+  }
+
+  .sub-row {
+    flex: 1;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+    background-color: #ffffff;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+  }
+
+  th, td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+    font-size: 14px;
+    word-wrap: break-word;
+  }
+
+  th {
+    background-color: #f2f2f2;
+  }
+
+  .bug-table-container {
+    width: 80%;
+    margin-bottom: 30px;
+  }
+</style>
+  <script>
+    let sp3Chart = undefined;
+    let pageloadChart = undefined;
+
+    const backgroundColorPlugin = {
+      id: 'backgroundColor',
+      beforeDraw: (chart) => {
+        const {ctx, width, height} = chart;
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, width, height);
+      }
+    };
+
+    function displaySP3Chart(platform) {
+      const rows = window.sp3Results.data.rows;
+
+      const firefoxData = rows.filter(row => row.application === getFirefoxApp(platform) && row.platform === get_CI_Platform(platform));
+      const chromeData = rows.filter(row => row.application === getChromeApp(platform) && row.platform === get_CI_Platform(platform));
+
+      const firefoxDataset = {
+        label: 'Firefox Nightly',
+        data: firefoxData.map(row => ({ x: new Date(row.date), y: row.value })),
+        borderColor: 'rgba(255, 99, 132, 1)',
+        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+        fill: false,
+        borderWidth: 1,
+        tension: 0.1,
+        trendlineLinear: {
+          style: "rgba(255,105,180, .8)",
+          lineStyle: "dotted",
+          width: 2
+        }
+      };
+
+      const chromeDataset = {
+        label: 'Chromium',
+        data: chromeData.map(row => ({ x: new Date(row.date), y: row.value })),
+        borderColor: 'rgba(54, 162, 235, 1)',
+        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+        fill: false,
+        borderWidth: 1,
+        tension: 0.1,
+        trendlineLinear: {
+          style: "rgba(255,105,180, .8)",
+          lineStyle: "dotted",
+          width: 2
+        }
+      };
+
+      const allValues = [...firefoxDataset.data, ...chromeDataset.data].map(point => point.y);
+      const maxValue = Math.round(Math.max(...allValues)+2);
+      const minValue = Math.max(0,Math.round(Math.min(...allValues)-2));
+
+      const ctx = document.getElementById('sp3-canvas').getContext('2d');
+
+      if (sp3Chart) {
+        sp3Chart.destroy();
+      }
+      sp3Chart = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+          datasets: [firefoxDataset, chromeDataset]
+        },
+        options: {
+          scales: {
+            x: {
+              type: 'time',
+              time: {
+                unit: 'day',
+                tooltipFormat: 'll',
+              },
+              title: {
+                display: true,
+                text: 'Date'
+              }
+            },
+            y: {
+              beginAtZero: false,
+              min: minValue,
+              max: maxValue,
+              title: {
+                display: true,
+                text: 'Score (higher is better)'
+              }
+            }
+          }
+        },
+        plugins: [backgroundColorPlugin]
+      });
+    }
+
+    function displayPageloadChart(platform) {
+      const rows = window.pageloadResults;
+
+      const fcpMeanData = rows.filter(row => row.platform === platform).map(row => ({ x: new Date(row.buildid), y: row.fcp_mean }));
+      const lcpMeanData = rows.filter(row => row.platform === platform).map(row => ({ x: new Date(row.buildid), y: row.lcp_mean }));
+      const loadMeanData = rows.filter(row => row.platform === platform).map(row => ({ x: new Date(row.buildid), y: row.load_mean }));
+
+      const datasets = [
+          { label: 'FCP Mean', data: fcpMeanData, borderColor: 'rgba(54, 162, 235, 1)', backgroundColor: 'rgba(54, 162, 235, 0.2)', fill: false,
+            trendlineLinear: {
+              style: "rgba(255,99,132, .8)",
+              lineStyle: "dotted",
+              width: 2
+            }
+          },
+          { label: 'LCP Mean', data: lcpMeanData, borderColor: 'rgba(255, 159, 64, 1)', backgroundColor: 'rgba(255, 159, 64, 0.2)', fill: false,
+            trendlineLinear: {
+              style: "rgba(255,99,132, .8)",
+              lineStyle: "dotted",
+              width: 2
+            }
+          },
+          { label: 'LoadTime Mean', data: loadMeanData, borderColor: 'rgba(75, 192, 192, 1)', backgroundColor: 'rgba(75, 192, 192, 0.2)', fill: false,
+            trendlineLinear: {
+              style: "rgba(255,99,132, .8)",
+              lineStyle: "dotted",
+              width: 2
+            }
+          },
+      ];
+
+      const ctx = document.getElementById('pageload-canvas').getContext('2d');
+
+      if (pageloadChart) {
+        pageloadChart.destroy();
+      }
+
+      pageloadChart = new Chart(ctx, {
+        type: 'scatter',
+        data: { datasets },
+        options: {
+          scales: {
+            x: {
+              type: 'time',
+              time: { unit: 'day', tooltipFormat: 'll' },
+              title: { display: true, text: 'Date' }
+            },
+            y: {
+              beginAtZero: false,
+              title: { display: true, text: 'Time (ms)' }
+            }
+          }
+        },
+        plugins: [backgroundColorPlugin]
+      });
+    }
+
+    function loadSP3Data() {
+      fetch('https://sql.telemetry.mozilla.org/api/queries/101536/results.json?api_key=6TmTXjf8lmGW7tGxxrfNtbH6xhr8yprDPTob111E')
+        .then(response => response.json())
+        .then(data => {
+          window.sp3Results = data.query_result;
+          displaySP3Chart('windows');
+        })
+        .catch(error => console.error('Error loading the JSON file:', error));
+    }
+
+    function loadPageloadData() {
+      fetch('https://sql.telemetry.mozilla.org/api/queries/101556/results.json?api_key=ryuxVWrt0YMQg2e466Ub01NfzNg3QXWOmIWM1XSP')
+        .then(response => response.json())
+        .then(data => {
+          console.log(data);
+          window.pageloadResults = data.query_result.data.rows;
+          displayPageloadChart('windows');
+        })
+        .catch(error => console.error('Error loading the JSON file:', error));
+    }
+
+    function displayBugTable(bugs, tableBody) {
+      bugs.forEach(bug => {
+        const row = document.createElement('tr');
+        const lastUpdate = (new Date(bug.last_change_time)).toISOString().split('T')[0];
+        row.innerHTML = `
+          <td><a href="https://bugzilla.mozilla.org/show_bug.cgi?id=${bug.id}">${bug.id}</a></td>
+          <td>${bug.status}</td>
+          <td>${bug.component}</td>
+          <td>${bug.summary}</td>
+          <td>${lastUpdate}</td>
+        `;
+        tableBody.appendChild(row);
+      });
+    }
+
+    function displayRegressionBugs() {
+      const regressionTableBody = document.querySelector('#regression-table tbody');
+      const regressions = window.bugs.filter(bug => bug.keywords.includes('regression'));
+      displayBugTable(regressions, regressionTableBody);
+    }
+
+    function displayHighImpactBugs() {
+      const highImpactTableBody = document.querySelector('#bug-table tbody');
+      const highImpactBugs = window.bugs.filter(bug => !bug.keywords.includes('regression'));
+      displayBugTable(highImpactBugs, highImpactTableBody);
+    }
+
+    function loadBugzillaData() {
+      const bugzillaUrl = 'https://raw.githubusercontent.com/dpalmeiro/mozilla-perf-bugdata/main/bugzilla-data-high.json';
+
+      fetch(bugzillaUrl)
+        .then(response => response.json())
+        .then(data => {
+          console.log(data);
+          // bugzilla sorts from oldest->newest, so reverse the array.
+          window.bugs = data.bugs.reverse().filter(bug => bug.status !== 'RESOLVED');
+          displayRegressionBugs();
+          displayHighImpactBugs();
+        })
+        .catch(error => console.error('Error fetching Bugzilla data:', error));
+    }
+
+    function generateContent() {
+      loadSP3Data();
+      loadPageloadData();
+      loadBugzillaData();
+    }
+
+    function switchPlatform(platform) {
+      displaySP3Chart(platform);
+      displayPageloadChart(platform);
+    }
+
+    document.addEventListener("DOMContentLoaded", generateContent);
+  </script>
+
+</head>
+<body>
+  <div class="platform-buttons">
+    <button onclick="switchPlatform('windows')">Windows</button>
+    <button onclick="switchPlatform('linux')">Linux</button>
+    <button onclick="switchPlatform('mac')">Mac</button>
+    <button onclick="switchPlatform('android')">Android</button>
+  </div>
+
+  <div class="row">
+    <div class="content-row">
+      <div class="sub-row">
+        <div class="row-title">Speedometer 3 (past 90 days)</div>
+        <div class="content-row">
+          <div class="canvas-column">
+            <canvas id="sp3-canvas"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="sub-row">
+        <div class="row-title">Firefox Nightly Pageload Metrics (past 90 days)</div>
+        <div class="content-row">
+          <div class="canvas-column">
+            <canvas id="pageload-canvas"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bug-table-container">
+    <div class="row-title" style="text-align: center">High Impact Regressions</div>
+    <table id="regression-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Status</th>
+          <th>Component</th>
+          <th>Summary</th>
+          <th>Last Update</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="bug-table-container">
+    <div class="row-title" style="text-align: center">High Impact Non-Regressions</div>
+    <table id="bug-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Status</th>
+          <th>Component</th>
+          <th>Summary</th>
+          <th>Last Update</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</body>
+</html>
+
