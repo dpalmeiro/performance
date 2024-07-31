@@ -107,6 +107,11 @@
     background-color: #f2f2f2;
   }
 
+  tr:hover {
+    background-color: #f0f0f0;
+    cursor: pointer;
+  }
+
   .bug-table-container {
     width: 80%;
     margin-bottom: 30px;
@@ -286,12 +291,15 @@
         const row = document.createElement('tr');
         const lastUpdate = (new Date(bug.last_change_time)).toISOString().split('T')[0];
         row.innerHTML = `
-          <td><a href="https://bugzilla.mozilla.org/show_bug.cgi?id=${bug.id}">${bug.id}</a></td>
+          <td>${bug.id}</td>
           <td>${bug.status}</td>
           <td>${bug.component}</td>
           <td>${bug.summary}</td>
           <td>${lastUpdate}</td>
         `;
+        row.onclick = () => {
+          window.top.location.href = `https://bugzilla.mozilla.org/show_bug.cgi?id=${bug.id}`;
+        };
         tableBody.appendChild(row);
       });
     }

@@ -1,6 +1,6 @@
 function get_CI_Platform(platform) {
   const platformMap = {
-    "windows": "windows10-64-shippable-qr",
+    "windows": "windows11-64-shippable-qr",
     "mac":  "macosx1400-64-shippable-qr",
     "linux": "linux1804-64-shippable-qr",
     "android": "android-hw-a51-11-0-aarch64-shippable-qr"

@@ -6,10 +6,6 @@
 <title>Performance Bugs</title>
 <script src="helpers.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels/dist/chartjs-plugin-datalabels.min.js"></script>
 
 <style>
   body {
@@ -20,27 +16,6 @@
     margin: 0;
     font-family: Arial, sans-serif;
     background-color: #f0f0f0;
-  }
-
-  .platform-buttons {
-    display: flex;
-    gap: 50px;
-    margin-bottom: 50px;
-  }
-
-  .platform-buttons button {
-    padding: 15px 30px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    background-color: #808080;
-    color: white;
-    font-size: 18px;
-    transition: background-color 0.3s;
-  }
-
-  .platform-buttons button:hover {
-    background-color: #505050;
   }
 
   .row {
@@ -71,15 +46,37 @@
     gap: 20px;
   }
 
-  .number-column {
-    width: 30%;
+  .metrics-container {
+    width: 80%;
+    margin-bottom: 30px;
+  }
+
+  .metrics {
     display: flex;
+    justify-content: space-around;
+    width: 100%;
+    text-align: center;
+  }
+
+  .metric-column {
+    display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    font-size: 40px;
     background-color: #e0e0e0;
     border-radius: 10px;
     padding: 20px;
+    margin: 0 10px;
+    flex: 1;
+  }
+
+  .metric-title {
+    font-size: 20px;
+    margin-bottom: 10px;
+  }
+
+  .metric-number {
+    font-size: 50px;
   }
 
   .canvas-column canvas {
@@ -114,37 +111,87 @@
     background-color: #f2f2f2;
   }
 
+  tr:hover {
+    background-color: #f0f0f0;
+    cursor: pointer;
+  }
+
   .bug-table-container {
     width: 80%;
     margin-bottom: 30px;
   }
 </style>
   <script>
-    function displayBugTable(bugs, tableBody) {
-      bugs.forEach(bug => {
+    function displayMetrics() {
+      const regressionCount = window.openBugs.filter(bug => bug.keywords.includes('regression')).length;
+      const newBugCount = window.openBugs.filter(bug => new Date(bug.creation_time) > new Date('2024-01-01')).length;
+      const resolvedBugCount = window.resolvedBugs.filter(bug => new Date(bug.creation_time) > new Date('2024-01-01')).length;
+      const fixedBugCount = window.resolvedBugs.filter(bug => bug.resolution === 'FIXED' && new Date(bug.creation_time) > new Date('2024-01-01')).length;
+
+      document.getElementById('regression-count').textContent = regressionCount;
+      document.getElementById('new-bug-count').textContent = newBugCount;
+      document.getElementById('resolved-bug-count').textContent = resolvedBugCount;
+      document.getElementById('fixed-bug-count').textContent = fixedBugCount;
+    }
+
+    function displayBugTables() {
+      const impactOrder = {
+        '?': 1,
+        'pending-needinfo': 2,
+        'high': 3,
+        'medium': 4,
+        'low': 5
+      };
+      const regressions = window.openBugs.filter(bug => bug.keywords.includes('regression')).sort((a, b) => {
+        if (a.cf_performance_impact === b.cf_performance_impact) {
+          return (new Date(b.last_change_time)) - (new Date(a.last_change_time));
+        } else {
+          return impactOrder[a.cf_performance_impact] - impactOrder[b.cf_performance_impact];
+        }
+      });
+
+      const regressionTableBody = document.querySelector('#regression-table tbody');
+
+      regressions.forEach(bug => {
+        const row = document.createElement('tr');
+        const lastUpdate = (new Date(bug.last_change_time)).toISOString().split('T')[0];
+        const creationDate = (new Date(bug.creation_time)).toISOString().split('T')[0];
+        row.innerHTML = `
+          <td>${bug.id}</td>
+          <td>${bug.status}</td>
+          <td>${bug.cf_performance_impact}</td>
+          <td>${bug.priority}</td>
+          <td>${bug.component}</td>
+          <td>${bug.summary}</td>
+          <td>${creationDate}</td>
+          <td>${lastUpdate}</td>
+        `;
+        row.onclick = () => {
+          window.top.location.href = `https://bugzilla.mozilla.org/show_bug.cgi?id=${bug.id}`;
+        };
+        regressionTableBody.appendChild(row);
+      });
+
+      const highImpactTableBody = document.querySelector('#high-impact-table tbody');
+      const highImpactBugs = window.highImpact.filter(bug => bug.status !== 'RESOLVED');
+      highImpactBugs.forEach(bug => {
         const row = document.createElement('tr');
         const lastUpdate = (new Date(bug.last_change_time)).toISOString().split('T')[0];
         const creationDate = (new Date(bug.creation_time)).toISOString().split('T')[0];
         row.innerHTML = `
           <td><a href="https://bugzilla.mozilla.org/show_bug.cgi?id=${bug.id}">${bug.id}</a></td>
           <td>${bug.status}</td>
+          <td>${bug.priority}</td>
           <td>${bug.component}</td>
           <td>${bug.summary}</td>
           <td>${lastUpdate}</td>
           <td>${creationDate}</td>
         `;
-        tableBody.appendChild(row);
+        row.onclick = () => {
+          window.top.location.href = `https://bugzilla.mozilla.org/show_bug.cgi?id=${bug.id}`;
+        };
+        highImpactTableBody.appendChild(row);
       });
-    }
-
-    function displayRegressionTable() {
-      const regressionTableBody = document.querySelector('#regression-table tbody');
-      const regressions = window.openBugs.filter(bug => bug.keywords.includes('regression'));
-      displayBugTable(regressions, regressionTableBody);
-    }
-
-    function displayBugTables() {
-      displayRegressionTable();
     }
 
     const backgroundColorPlugin = {
@@ -165,6 +212,12 @@
       const labels = Object.keys(os_counts).map(key => `${key} (${os_counts[key]})`);
       const data = Object.values(os_counts);
 
+      const navigateToBugzilla = (label) => {
+        const op_sys = label.split(' (')[0];
+        const url = `https://bugzilla.mozilla.org/buglist.cgi?f1=cf_performance_impact&o1=isnotempty&query_format=advanced&bug_status=__open__&op_sys=${encodeURIComponent(op_sys)}&f3=cf_performance_impact&o3=notequals&v3=none`;
+        window.top.location.href = url;
+      };
+
       const ctx = document.getElementById('os-canvas').getContext('2d');
       const osChart = new Chart(ctx, {
         type: 'pie',
@@ -176,14 +229,25 @@
         },
         options: {
           responsive: true,
+          onClick: (event, elements) => {
+            if (elements.length > 0) {
+              const chartElement = elements[0];
+              const label = osChart.data.labels[chartElement.index];
+              navigateToBugzilla(label);
+            }
+          },
           plugins: {
             legend: {
               position: 'right',
+              onClick: (e, legendItem, legend) => {
+                const label = legendItem.text;
+                navigateToBugzilla(label);
+              },
               labels: {
                 boxWidth: 20,
                 maxWidth: 300,
                 font: {
-                  size: 12
+                  size: 16
                 }
               }
             }
@@ -203,8 +267,14 @@
       const labels = Object.keys(componentCounts).map(key => `${key} (${componentCounts[key]})`);
       const data = Object.values(componentCounts);
 
+      const navigateToBugzilla = (label) => {
+        const component = label.split(' (')[0];
+        const url = `https://bugzilla.mozilla.org/buglist.cgi?f1=cf_performance_impact&o1=isnotempty&query_format=advanced&bug_status=__open__&component=${encodeURIComponent(component)}&f3=cf_performance_impact&o3=notequals&v3=none`;
+        window.top.location.href = url;
+      };
+
       const ctx = document.getElementById('component-canvas').getContext('2d');
-      const myPieChart = new Chart(ctx, {
+      const componentChart = new Chart(ctx, {
         type: 'pie',
         data: {
           labels: labels,
@@ -214,9 +284,20 @@
         },
         options: {
           responsive: true,
+          onClick: (event, elements) => {
+            if (elements.length > 0) {
+              const chartElement = elements[0];
+              const label = componentChart.data.labels[chartElement.index];
+              navigateToBugzilla(label);
+            }
+          },
           plugins: {
             legend: {
-              position: 'right',
+              position: 'bottom',
+              onClick: (e, legendItem, legend) => {
+                const label = legendItem.text;
+                navigateToBugzilla(label);
+              },
               labels: {
                 boxWidth: 20,
                 maxWidth: 300,
@@ -239,13 +320,30 @@
       const untriagedLength = window.untriaged.filter(bug => bug.status !== 'RESOLVED').length;
       const needinfoLength = window.needinfo.filter(bug => bug.status !== 'RESOLVED').length;
 
+      window.highImpact.forEach(bug => bug.cf_performance_impact = 'high');
+      window.medImpact.forEach(bug => bug.cf_performance_impact = 'medium');
+      window.lowImpact.forEach(bug => bug.cf_performance_impact = 'low');
+      window.untriaged.forEach(bug => bug.cf_performance_impact = '?');
+      window.needinfo.forEach(bug => bug.cf_performance_impact = 'pending-needinfo');
+
       const labels = [
-            `High Impact (${highImpactLength})`,
-            `Medium Impact (${medImpactLength})`,
-            `Low Impact (${lowImpactLength})`,
+            `High (${highImpactLength})`,
+            `Medium (${medImpactLength})`,
+            `Low (${lowImpactLength})`,
             `Untriaged (${untriagedLength})`,
             `Pending Needinfo (${needinfoLength})`,
       ];
+
+      const navigateToBugzilla = (label) => {
+        let impact = label.split(' ')[0];
+        if (impact === 'Pending') {
+          impact = 'pending-needinfo';
+        } else if (impact === 'Untriaged') {
+          impact = '%3F';
+        }
+        const url = `https://bugzilla.mozilla.org/buglist.cgi?f1=cf_performance_impact&v1=${impact}&o1=equals&query_format=advanced&bug_status=__open__`
+        window.top.location.href = url;
+      };
 
       const ctx = document.getElementById('impact-canvas').getContext('2d');
       const impactChart = new Chart(ctx, {
@@ -260,9 +358,27 @@
         },
         options: {
           responsive: true,
+          onClick: (event, elements) => {
+            if (elements.length > 0) {
+              const chartElement = elements[0];
+              const label = impactChart.data.labels[chartElement.index];
+              navigateToBugzilla(label);
+            }
+          },
           plugins: {
             legend: {
-              position: 'right'
+              position: 'right',
+              onClick: (e, legendItem, legend) => {
+                const label = legendItem.text;
+                navigateToBugzilla(label);
+              },
+              labels: {
+                boxWidth: 20,
+                maxWidth: 300,
+                font: {
+                  size: 16
+                }
+              },
             }
           }
         },
@@ -273,7 +389,7 @@
     function displayStatsChart() {
       let startDate = '2024-01-01';
       const recentBugs = window.openBugs.filter(bug => new Date(bug.last_change_time) > new Date(startDate));
-      const fixedBugs = window.closedBugs.filter(bug.resolution === 'FIXED').length;
+      const fixedBugs = window.resolvedBugs.filter(bug.resolution === 'FIXED').length;
 
       const regressions = recentBugs.filter(bug => bug.keywords.includes('regression')).length;
       const newBugs = recentBugs.filter(bug => new Date(bug.creation_time) > new Date(startDate)).length;
@@ -312,41 +428,35 @@
     }
 
     function displayPerfKeywordsChart() {
-        const perfKeywords = {
-          'responsiveness': 'perf:responsiveness',
-          'animation': 'perf:animation',
-          'resource-use': ['perf:resource', 'perf:resources', 'perf:resource-use', 'perf:memory'],
-          'pageload': 'perf:pageload',
-          'startup': 'perf:startup'
-        };
-
         const perfCounts = window.openBugs.reduce((acc, bug) => {
-          bug.keywords.forEach(keyword => {
-            if (keyword.startsWith('perf:')) {
-              let found = false;
-              Object.keys(perfKeywords).forEach(key => {
-                if (Array.isArray(perfKeywords[key])) {
-                  if (perfKeywords[key].includes(keyword)) {
-                    acc[key] = (acc[key] || 0) + 1;
-                    found = true;
-                  }
-                } else {
-                  if (keyword === perfKeywords[key]) {
-                    acc[key] = (acc[key] || 0) + 1;
-                    found = true;
-                  }
-                }
-              });
-              if (!found) {
-                acc['Unspecified'] = (acc['Unspecified'] || 0) + 1;
-              }
-            }
-          });
-          return acc;
+             let hasPerfKeyword = false;
+             bug.keywords.forEach(keyword => {
+                 if (keyword.startsWith('perf:')) {
+                     hasPerfKeyword = true;
+                     acc[keyword] = (acc[keyword] || 0) + 1;
+                 }
+             });
+             if (!hasPerfKeyword) {
+                 acc['unspecified'] = (acc['unspecified'] || 0) + 1;
+             }
+             return acc;
         }, {});
 
-        const labels = Object.keys(perfCounts).map(key => `${key} (${perfCounts[key]})`);
+        const labels = Object.keys(perfCounts).map(key => `${key.replace('perf:', '')} (${perfCounts[key]})`);
         const data = Object.values(perfCounts);
+
+        const navigateToBugzilla = (label) => {
+          const value = label.split(' (')[0];
+            
+          if (value === 'unspecified') {
+            const url = 'https://bugzilla.mozilla.org/buglist.cgi?f2=cf_performance_impact&bug_status=__open__&f1=keywords&query_format=advanced&o1=notsubstring&v1=perf%3A&o2=isnotempty&f3=cf_performance_impact&o3=notequals&v3=none';
+            window.top.location.href = url;
+          } else {
+            const keyword = encodeURIComponent(`perf:${value}`);
+            const url = `https://bugzilla.mozilla.org/buglist.cgi?o1=substring&query_format=advanced&bug_status=__open__&f2=cf_performance_impact&o2=isnotempty&v1=${keyword}&f1=keywords&f3=cf_performance_impact&o3=notequals&v3=none`
+            window.top.location.href = url;
+          }
+        };
 
         const ctx = document.getElementById('keyword-canvas').getContext('2d');
         const perfKeywordChart = new Chart(ctx, {
@@ -359,9 +469,27 @@
           },
           options: {
             responsive: true,
+            onClick: (event, elements) => {
+              if (elements.length > 0) {
+                const chartElement = elements[0];
+                const label = perfKeywordChart.data.labels[chartElement.index];
+                navigateToBugzilla(label);
+              }
+            },
             plugins: {
               legend: {
-                position: 'right'
+                position: 'right',
+                onClick: (e, legendItem, legend) => {
+                  const label = legendItem.text;
+                  navigateToBugzilla(label);
+                },
+                labels: {
+                  boxWidth: 20,
+                  maxWidth: 300,
+                  font: {
+                    size: 16
+                  }
+                }
               }
             }
           },
@@ -387,13 +515,13 @@
           allBugs.sort((a, b) => (new Date(b.last_change_time)) - (new Date(a.last_change_time)));
 
           window.openBugs = allBugs.filter(bug => bug.status !== 'RESOLVED');
-          window.closedBugs = allBugs.filter(bug => bug.status === 'RESOLVED');
+          window.resolvedBugs = allBugs.filter(bug => bug.status === 'RESOLVED');
 
+          displayMetrics();
           displayPerfKeywordsChart();
           displayImpactChart();
           displayComponentChart();
           displayOSChart();
-
           displayBugTables();
         })
         .catch(error => console.error('Error fetching Bugzilla data:', error));
@@ -408,6 +536,29 @@
 
 </head>
 <body>
+  <div class="metrics-container">
+    <div class="row-title" style="text-align: center">Metrics (YTD)</div>
+    <div class="metrics">
+      <div class="metric-column">
+        <div class="metric-title">Regressions</div>
+        <div class="metric-number" id="regression-count">0</div>
+      </div>
+      <div class="metric-column">
+        <div class="metric-title">New Bugs</div>
+        <div class="metric-number" id="new-bug-count">0</div>
+      </div>
+      <div class="metric-column">
+        <div class="metric-title">Resolved Bugs</div>
+        <div class="metric-number" id="resolved-bug-count">0</div>
+      </div>
+      <div class="metric-column">
+        <div class="metric-title">Fixed Bugs</div>
+        <div class="metric-number" id="fixed-bug-count">0</div>
+      </div>
+    </div>
+  </div>
+
+
   <div class="row">
     <div class="content-row">
       <div class="sub-row">
@@ -451,16 +602,36 @@
   </div>
 
   <div class="bug-table-container">
-    <div class="row-title" style="text-align: center">Open Regressions</div>
+    <div class="row-title" style="text-align: center">All High Impact Bugs</div>
+    <table id="high-impact-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Status</th>
+          <th>Priority</th>
+          <th>Component</th>
+          <th>Summary</th>
+          <th>Creation Date</th>
+          <th>Last Update</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="bug-table-container">
+    <div class="row-title" style="text-align: center">All Open Regressions</div>
     <table id="regression-table">
       <thead>
         <tr>
           <th>ID</th>
           <th>Status</th>
+          <th>Impact</th>
+          <th>Priority</th>
           <th>Component</th>
           <th>Summary</th>
-          <th>Last Update</th>
           <th>Creation Date</th>
+          <th>Last Update</th>
         </tr>
       </thead>
       <tbody></tbody>
