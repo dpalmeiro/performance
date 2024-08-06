@@ -29,7 +29,7 @@
     margin-bottom: 10px;
     border-bottom: 3px double #000;
     padding-bottom: 5px;
-    text-align: left;
+    text-align: center;
   }
 
   .stats-row {
@@ -119,6 +119,8 @@
   .bug-table-container {
     width: 80%;
     margin-bottom: 30px;
+    max-height: 600px;
+    overflow-y: auto;
   }
 </style>
   <script>
@@ -133,6 +135,36 @@
       document.getElementById('resolved-bug-count').textContent = resolvedBugCount;
       document.getElementById('fixed-bug-count').textContent = fixedBugCount;
     }
+
+    function sortTable(columnIndex, tableId) {
+      const table = document.getElementById(tableId);
+      const tbody = table.getElementsByTagName('tbody')[0];
+      const rows = Array.from(tbody.getElementsByTagName('tr'));
+
+      const isAscending = table.getAttribute('data-sort-direction') === 'asc';
+      const direction = isAscending ? 1 : -1;
+
+      rows.sort((a, b) => {
+        const cellA = a.getElementsByTagName('td')[columnIndex].innerText.toLowerCase();
+        const cellB = b.getElementsByTagName('td')[columnIndex].innerText.toLowerCase();
+
+        if (!isNaN(cellA) && !isNaN(cellB)) {
+          return direction * (parseFloat(cellA) - parseFloat(cellB));
+        } else {
+          return direction * cellA.localeCompare(cellB);
+        }
+      });
+
+      while (tbody.firstChild) {
+        tbody.removeChild(tbody.firstChild);
+      }
+      rows.forEach(row => tbody.appendChild(row));
+      table.setAttribute('data-sort-direction', isAscending ? 'desc' : 'asc');
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      loadBugzillaData();
+    });
 
     function displayBugTables() {
       const impactOrder = {
@@ -179,7 +211,7 @@
         const lastUpdate = (new Date(bug.last_change_time)).toISOString().split('T')[0];
         const creationDate = (new Date(bug.creation_time)).toISOString().split('T')[0];
         row.innerHTML = `
-          <td><a href="https://bugzilla.mozilla.org/show_bug.cgi?id=${bug.id}">${bug.id}</a></td>
+          <td>${bug.id}</td>
           <td>${bug.status}</td>
           <td>${bug.priority}</td>
           <td>${bug.component}</td>
@@ -247,7 +279,7 @@
                 boxWidth: 20,
                 maxWidth: 300,
                 font: {
-                  size: 16
+                  size: 14
                 }
               }
             }
@@ -256,6 +288,92 @@
         plugins: [backgroundColorPlugin]
       });
       
+    }
+
+    function displayComponentTable() {
+      const componentCounts = window.openBugs.reduce((acc, bug) => {
+        acc[bug.component] = (acc[bug.component] || 0) + 1;
+        return acc;
+      }, {});
+
+      const totalBugs = window.openBugs.length;
+      const components = Object.keys(componentCounts).map(component => ({
+        name: component,
+        count: componentCounts[component],
+        percentage: ((componentCounts[component] / totalBugs) * 100).toFixed(2)
+      }));
+
+      components.sort((a, b) => b.count - a.count);
+
+      const tableBody = document.querySelector('#component-table tbody');
+      components.forEach(component => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${component.name}</td>
+          <td>${component.count}</td>
+          <td>${component.percentage}%</td>
+        `;
+        row.onclick = () => {
+          const url = `https://bugzilla.mozilla.org/buglist.cgi?f1=cf_performance_impact&o1=isnotempty&query_format=advanced&bug_status=__open__&component=${encodeURIComponent(component.name)}&f3=cf_performance_impact&o3=notequals&v3=none`;
+          window.top.location.href = url;
+        };
+        tableBody.appendChild(row);
+      });
+    }
+
+    function displayHighImpactChart() {
+      const openHighImpactBugs = window.highImpact.filter(bug => bug.status !== 'RESOLVED');
+      const componentCounts = openHighImpactBugs.reduce((acc, bug) => {
+        acc[bug.component] = (acc[bug.component] || 0) + 1;
+        return acc;
+      }, {});
+
+      const labels = Object.keys(componentCounts).map(key => `${key} (${componentCounts[key]})`);
+      const data = Object.values(componentCounts);
+
+      const navigateToBugzilla = (label) => {
+        const component = label.split(' (')[0];
+        const url = `https://bugzilla.mozilla.org/buglist.cgi?f1=cf_performance_impact&o1=equals&v1=high&query_format=advanced&bug_status=__open__&component=${encodeURIComponent(component)}`;
+        window.top.location.href = url;
+      };
+
+      const ctx = document.getElementById('high-impact-canvas').getContext('2d');
+      const highImpactComponentChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: data,
+          }]
+        },
+        options: {
+          responsive: true,
+          onClick: (event, elements) => {
+            if (elements.length > 0) {
+              const chartElement = elements[0];
+              const label = highImpactComponentChart.data.labels[chartElement.index];
+              navigateToBugzilla(label);
+            }
+          },
+          plugins: {
+            legend: {
+              position: 'right',
+              onClick: (e, legendItem, legend) => {
+                const label = legendItem.text;
+                navigateToBugzilla(label);
+              },
+              labels: {
+                boxWidth: 20,
+                maxWidth: 300,
+                font: {
+                  size: 12
+                }
+              }
+            }
+          }
+        },
+        plugins: [backgroundColorPlugin]
+      });
     }
 
     function displayComponentChart() {
@@ -376,7 +494,7 @@
                 boxWidth: 20,
                 maxWidth: 300,
                 font: {
-                  size: 16
+                  size: 14
                 }
               },
             }
@@ -384,47 +502,6 @@
         },
         plugins: [backgroundColorPlugin]
       });
-    }
-
-    function displayStatsChart() {
-      let startDate = '2024-01-01';
-      const recentBugs = window.openBugs.filter(bug => new Date(bug.last_change_time) > new Date(startDate));
-      const fixedBugs = window.resolvedBugs.filter(bug.resolution === 'FIXED').length;
-
-      const regressions = recentBugs.filter(bug => bug.keywords.includes('regression')).length;
-      const newBugs = recentBugs.filter(bug => new Date(bug.creation_time) > new Date(startDate)).length;
-
-      const labels = ['Regressions', 'New Bugs', 'Fixed Bugs'];
-      const data = [regressions, newBugs, fixedBugs];
-
-      const ctx = document.getElementById('stats-canvas').getContext('2d');
-      const myHistogram = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: labels,
-          datasets: [{
-            label: 'Bug Counts',
-            data: data,
-            backgroundColor: [
-              '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0'
-            ],
-            borderColor: [
-              '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0'
-            ],
-            borderWidth: 1
-          }]
-        },
-        options: {
-          indexAxis: 'y',
-          scales: {
-            x: {
-              beginAtZero: true
-            }
-          }
-        },
-        plugins: [backgroundColorPlugin]
-      });
-
     }
 
     function displayPerfKeywordsChart() {
@@ -458,6 +535,8 @@
           }
         };
 
+        console.log("BLAH");
+
         const ctx = document.getElementById('keyword-canvas').getContext('2d');
         const perfKeywordChart = new Chart(ctx, {
           type: 'pie',
@@ -487,7 +566,7 @@
                   boxWidth: 20,
                   maxWidth: 300,
                   font: {
-                    size: 16
+                    size: 14
                   }
                 }
               }
@@ -503,8 +582,6 @@
       fetch(bugzillaUrl)
         .then(response => response.json())
         .then(data => {
-          console.log(data);
-
           // bugzilla sorts from oldest->newest, so reverse the arrays.
           window.highImpact = data.high.bugs.reverse();
           window.medImpact = data.medium.bugs.reverse();
@@ -520,7 +597,8 @@
           displayMetrics();
           displayPerfKeywordsChart();
           displayImpactChart();
-          displayComponentChart();
+          displayHighImpactChart();
+          displayComponentTable();
           displayOSChart();
           displayBugTables();
         })
@@ -540,12 +618,12 @@
     <div class="row-title" style="text-align: center">Metrics (YTD)</div>
     <div class="metrics">
       <div class="metric-column">
-        <div class="metric-title">Regressions</div>
-        <div class="metric-number" id="regression-count">0</div>
-      </div>
-      <div class="metric-column">
         <div class="metric-title">New Bugs</div>
         <div class="metric-number" id="new-bug-count">0</div>
+      </div>
+      <div class="metric-column">
+        <div class="metric-title">New Regressions</div>
+        <div class="metric-number" id="regression-count">0</div>
       </div>
       <div class="metric-column">
         <div class="metric-title">Resolved Bugs</div>
@@ -562,18 +640,18 @@
   <div class="row">
     <div class="content-row">
       <div class="sub-row">
-        <div class="row-title">Performance Type Distribution</div>
-        <div class="content-row">
-          <div class="canvas-column">
-            <canvas id="keyword-canvas"></canvas>
-          </div>
-        </div>
-      </div>
-      <div class="sub-row">
         <div class="row-title">Performance Impact Distribution</div>
         <div class="content-row">
           <div class="canvas-column">
             <canvas id="impact-canvas"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="sub-row">
+        <div class="row-title">High Impact Distribution</div>
+        <div class="content-row">
+          <div class="canvas-column">
+            <canvas id="high-impact-canvas"></canvas>
           </div>
         </div>
       </div>
@@ -591,53 +669,67 @@
         </div>
       </div>
       <div class="sub-row">
-        <div class="row-title">Component Distribution</div>
+        <div class="row-title">Performance Type Distribution</div>
         <div class="content-row">
           <div class="canvas-column">
-            <canvas id="component-canvas"></canvas>
+            <canvas id="keyword-canvas"></canvas>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="bug-table-container">
-    <div class="row-title" style="text-align: center">All High Impact Bugs</div>
-    <table id="high-impact-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Status</th>
-          <th>Priority</th>
-          <th>Component</th>
-          <th>Summary</th>
-          <th>Creation Date</th>
-          <th>Last Update</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+  <div class="row-title" style="width:80%">Component Distribution</div>
+  <div class="bug-table-container" style="max-height: 300px">
+     <table id="component-table">
+       <thead>
+         <tr>
+           <th>Component</th>
+           <th>Number of Bugs</th>
+           <th>Percentage of Bugs</th>
+         </tr>
+       </thead>
+       <tbody></tbody>
+     </table>
   </div>
 
+  <div class="row-title" style="width:80%">All Open Regressions</div>
   <div class="bug-table-container">
-    <div class="row-title" style="text-align: center">All Open Regressions</div>
     <table id="regression-table">
       <thead>
         <tr>
-          <th>ID</th>
-          <th>Status</th>
-          <th>Impact</th>
-          <th>Priority</th>
-          <th>Component</th>
-          <th>Summary</th>
-          <th>Creation Date</th>
-          <th>Last Update</th>
+          <th onclick="sortTable(0, 'regression-table')">ID</th>
+          <th onclick="sortTable(1, 'regression-table')">Status</th>
+          <th onclick="sortTable(2, 'regression-table')">Impact</th>
+          <th onclick="sortTable(3, 'regression-table')">Priority</th>
+          <th onclick="sortTable(4, 'regression-table')">Component</th>
+          <th onclick="sortTable(5, 'regression-table')">Summary</th>
+          <th onclick="sortTable(6, 'regression-table')">Creation Date</th>
+          <th onclick="sortTable(7, 'regression-table')">Last Update</th>
         </tr>
       </thead>
       <tbody></tbody>
     </table>
   </div>
 
+  <div class="row-title" style="width:80%">All High Impact Bugs</div>
+  <div class="bug-table-container">
+    <table id="high-impact-table">
+      <thead>
+        <tr>
+          <th onclick="sortTable(0, 'high-impact-table')">ID</th>
+          <th onclick="sortTable(1, 'high-impact-table')">Status</th>
+          <th onclick="sortTable(2, 'high-impact-table')">Priority</th>
+          <th onclick="sortTable(3, 'high-impact-table')">Component</th>
+          <th onclick="sortTable(4, 'high-impact-table')">Summary</th>
+          <th onclick="sortTable(5, 'high-impact-table')">Creation Date</th>
+          <th onclick="sortTable(6, 'high-impact-table')">Last Update</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+
 </body>
 </html>
-

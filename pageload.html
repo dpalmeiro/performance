@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Performance Bugs</title>
+<script src="helpers.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels/dist/chartjs-plugin-datalabels.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-trendline"></script>
+
+<style>
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 50px;
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background-color: #f0f0f0;
+  }
+
+  .content {
+    margin-left: 260px;
+    margin-right: 40px;
+    padding: 20px;
+    align-items: center;
+  }
+
+  .sidebar {
+    width: 220px;
+    padding: 20px;
+    background-color: #333;
+    color: white;
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+  }
+
+  .sidebar a {
+    display: block;
+    color: white;
+    padding: 10px 0;
+    text-decoration: none;
+  }
+
+  .sidebar a:hover {
+    background-color: #575757;
+  }
+
+  .sidebar .dropdown {
+    margin-bottom: 20px;
+  }
+  
+  .dropdown select {
+    width: 100%;
+    padding: 10px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    font-size: 16px;
+  }
+
+  .row {
+    width: 100%;
+    margin-bottom: 30px;
+  }
+
+  .row-title {
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    border-bottom: 3px double #000;
+    text-align: center;
+    width: 100%;
+  }
+
+  .content-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  .canvas-column canvas {
+    width: 100%;
+    height: 350px;
+    background-color: white;
+    border-radius: 1px;
+  }
+
+  .metric-container {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    padding: 10px;
+    margin-top: 10px;
+  }
+
+  .metric-item {
+    padding: 5px 10px;
+    margin: 0 5px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    background-color: #f9f9f9;
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .sub-row {
+    flex: 1;
+    /* border: 1px double #000; */
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+    background-color: #ffffff;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+  }
+
+  th, td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+    font-size: 14px;
+    word-wrap: break-word;
+  }
+
+  th {
+    background-color: #f2f2f2;
+  }
+
+  tr:hover {
+    background-color: #f0f0f0;
+    cursor: pointer;
+  }
+</style>
+
+  <script>
+    window.telemetryData = [];
+
+    let platformStatus = 'Windows';
+    let channelStatus = 'nightly';
+    let allCharts = [];
+    let finishedCount = 0;
+
+    function finishedLoadingData() {
+      finishedCount++;
+      if (finishedCount === 3) {
+        window.telemetryData = window.telemetryData.sort((a,b) => {
+          return new Date(a.date) - new Date(b.date);
+        });
+        displayPageloadCharts();
+      }
+    }
+
+    function setChannel(channel) {
+      channelStatus = channel;
+      displayPageloadCharts();
+    }
+
+    function setPlatform(platform) {
+      platformStatus = platform;
+      displayPageloadCharts();
+    }
+
+    function displayBugTable() {
+      const highImpactTableBody = document.querySelector('#high-impact-table tbody');
+      const highImpactBugs = window.highImpact.filter(bug => bug.status !== 'RESOLVED');
+      highImpactBugs.forEach(bug => {
+        const row = document.createElement('tr');
+        const lastUpdate = (new Date(bug.last_change_time)).toISOString().split('T')[0];
+        const creationDate = (new Date(bug.creation_time)).toISOString().split('T')[0];
+        row.innerHTML = `
+          <td>${bug.id}</td>
+          <td>${bug.status}</td>
+          <td>${bug.priority}</td>
+          <td>${bug.component}</td>
+          <td>${bug.summary}</td>
+          <td>${lastUpdate}</td>
+          <td>${creationDate}</td>
+        `;
+        row.onclick = () => {
+          window.top.location.href = `https://bugzilla.mozilla.org/show_bug.cgi?id=${bug.id}`;
+        };
+        highImpactTableBody.appendChild(row);
+      });
+    }
+
+    function calculateImprovement(values, days) {
+      const subset = values.slice(-days);
+      const firstAvg = subset.slice(0, 7).reduce((a, b) => a + b, 0) / 7;
+      const lastAvg = subset.slice(-7).reduce((a, b) => a + b, 0) / 7;
+      return ((lastAvg - firstAvg) / firstAvg * 100).toFixed(2);
+    }
+
+    function displayMetrics(id, values) {
+      function getImprovementColor(improvement) {
+        if (improvement > 5)
+          return "red";
+        else if (improvement < -5)
+          return "green";
+        else 
+          return "black";
+      }
+
+      const improvement90 = calculateImprovement(values, 90);
+      const improvement60 = calculateImprovement(values, 60);
+      const improvement30 = calculateImprovement(values, 30);
+      document.getElementById(id).innerHTML = `
+        <div class="metric-item">Last 90 days: <font style="color: ${getImprovementColor(improvement90)};">${improvement90}%</font></div>
+        <div class="metric-item">Last 60 days: <font style="color: ${getImprovementColor(improvement60)};">${improvement60}%</font></div>
+        <div class="metric-item">Last 30 days: <font style="color: ${getImprovementColor(improvement30)};">${improvement30}%</font></div>
+      `;
+    }
+
+    function plotChart(id, labels, values1, title1, color1, values2, title2, color2) {
+      const ctx = document.getElementById(id+"-canvas").getContext('2d');
+      let chart = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: title1,
+              data: values1,
+              borderColor: color1,
+              fill: false,
+              borderWidth: 1,
+              tension: 0.1,
+              trendlineLinear: {
+                style: "rgba(255,105,180, .8)",
+                lineStyle: "dotted",
+                width: 2
+              }
+            },
+            {
+              label: title2,
+              data: values2,
+              borderColor: color2,
+              fill: false,
+              borderWidth: 1,
+              tension: 0.1,
+              trendlineLinear: {
+                style: "rgba(255,105,180, .8)",
+                lineStyle: "dotted",
+                width: 2
+              }
+            }
+          ]
+        },
+        options: {
+          scales: {
+            x: {
+              type: 'time',
+              time: { unit: 'day', tooltipFormat: 'll' },
+              title: { display: true, text: 'Date' }
+            },
+            y: {
+              beginAtZero: false,
+              title: { display: true, text: 'Time (ms)' }
+            }
+          }
+        },
+        plugins: [backgroundColorPlugin]
+      });
+
+      displayMetrics(id+"-metrics", values1);
+      allCharts.push(chart);
+    }
+
+    function displayFCPCharts(filteredData) {
+      const fcpData = filteredData.filter(row => row.metric === 'performance_pageload_fcp');
+      const labels = fcpData.map(row => row.date);
+      const meanValues = fcpData.map(row => row.mean);
+      const p50Values = fcpData.map(row => row.p_50);
+      const p95Values = fcpData.map(row => row.p_95);
+      const p99Values = fcpData.map(row => row.p_99);
+
+      plotChart("fcp-median-mean", labels, meanValues, "Mean", "red", p50Values, "Median", "green");
+      plotChart("fcp-p95-p99", labels, p95Values, "P95", "blue", p99Values, "P99", "orange");
+    }
+
+    function displayLCPCharts(filteredData) {
+      const lcpData = filteredData.filter(row => row.metric === 'perf_largest_contentful_paint');
+      const labels = lcpData.map(row => row.date);
+      const meanValues = lcpData.map(row => row.mean);
+      const p50Values = lcpData.map(row => row.p_50);
+      const p95Values = lcpData.map(row => row.p_95);
+      const p99Values = lcpData.map(row => row.p_99);
+
+      plotChart("lcp-median-mean", labels, meanValues, "Mean", "red", p50Values, "Median", "green");
+      plotChart("lcp-p95-p99", labels, p95Values, "P95", "blue", p99Values, "P99", "orange");
+    }
+
+    function displayLoadTimeCharts(filteredData) {
+      const loadData = filteredData.filter(row => row.metric === 'performance_pageload_load_time');
+      const labels = loadData.map(row => row.date);
+      const meanValues = loadData.map(row => row.mean);
+      const p50Values = loadData.map(row => row.p_50);
+      const p95Values = loadData.map(row => row.p_95);
+      const p99Values = loadData.map(row => row.p_99);
+
+      plotChart("load-median-mean", labels, meanValues, "Mean", "red", p50Values, "Median", "green");
+      plotChart("load-p95-p99", labels, p95Values, "P95", "blue", p99Values, "P99", "orange");
+    }
+
+    function displayResponseTimeCharts(filteredData) {
+      const responseData = filteredData.filter(row => row.metric === 'performance_time_response_start');
+      const labels = responseData.map(row => row.date);
+      const meanValues = responseData.map(row => row.mean);
+      const p50Values = responseData.map(row => row.p_50);
+      const p95Values = responseData.map(row => row.p_95);
+      const p99Values = responseData.map(row => row.p_99);
+
+      plotChart("response-median-mean", labels, meanValues, "Mean", "red", p50Values, "Median", "green");
+      plotChart("response-p95-p99", labels, p95Values, "P95", "blue", p99Values, "P99", "orange");
+    }
+
+    function displayPageloadCharts(platform) {
+      while (allCharts.length > 0) {
+        allCharts.pop().destroy();
+      }
+
+      if (platform === undefined) {
+        platform = platformStatus;
+      } else {
+        platformStatus = platform;
+      }
+
+      const channel  = channelStatus;
+      const filteredData = window.telemetryData.filter(row => row.channel === channel && row.os === platform);
+  
+      displayFCPCharts(filteredData);
+      displayLCPCharts(filteredData);
+      displayLoadTimeCharts(filteredData);
+      displayResponseTimeCharts(filteredData);
+    }
+
+    const backgroundColorPlugin = {
+      id: 'backgroundColor',
+      beforeDraw: (chart) => {
+        const {ctx, width, height} = chart;
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, width, height);
+      }
+    };
+
+    function loadBetaData() {
+      const url = 'https://sql.telemetry.mozilla.org/api/queries/101653/results.json?api_key=OtucZwTAEGY7SBgdLlgWtQPXvPQF4TaXGLzLUq8n';
+      fetch(url)
+        .then(response => response.json())
+        .then(data => {
+          window.telemetryData = window.telemetryData.concat(data.query_result.data.rows);
+          finishedLoadingData();
+        })
+        .catch(error => console.error('Error loading the JSON file:', error));
+    }
+
+    function loadReleaseData() {
+      const url = 'https://sql.telemetry.mozilla.org/api/queries/101616/results.json?api_key=uc7V76QeZ3FT94y0GPeg8YZkdtaJTEKqNGUtaT19';
+      fetch(url)
+        .then(response => response.json())
+        .then(data => {
+          window.telemetryData = window.telemetryData.concat(data.query_result.data.rows);
+          finishedLoadingData();
+        })
+        .catch(error => console.error('Error loading the JSON file:', error));
+    }
+
+    function loadNightlyData() {
+      const url = 'https://sql.telemetry.mozilla.org/api/queries/101647/results.json?api_key=lTPLgqu2UNPA1XxCz0dbayVAN4rGjNvTAmLU5WBV';
+      fetch(url)
+        .then(response => response.json())
+        .then(data => {
+          window.telemetryData = window.telemetryData.concat(data.query_result.data.rows);
+          finishedLoadingData();
+        })
+        .catch(error => console.error('Error loading the JSON file:', error));
+    }
+
+    function generateContent() {
+      loadNightlyData();
+      loadBetaData();
+      loadReleaseData();
+    }
+
+    document.addEventListener("DOMContentLoaded", generateContent);
+  </script>
+
+</head>
+<body>
+  <div class="sidebar">
+    <div class="dropdown">
+      <label for="channel-select">Channel:</label>
+      <select id="channel-select" onchange="setChannel(this.value)">
+        <option value="nightly">Nightly</option>
+        <option value="beta">Beta</option>
+        <option value="release">Release</option>
+      </select>
+    </div>
+    <div class="dropdown">
+      <label for="platform-select">Platform:</label>
+      <select id="platform-select" onchange="setPlatform(this.value)">
+        <option value="Windows">Windows</option>
+        <option value="Linux">Linux</option>
+        <option value="Mac">Mac</option>
+        <option value="Android">Android</option>
+      </select>
+    </div>
+
+    <a href="#fcp-section">First Contentful Paint</a>
+    <a href="#lcp-section">Largest Contentful Paint</a>
+    <a href="#load-section">Pageload Time</a>
+    <a href="#response-section">Response Time</a>
+  </div>
+
+  <div class="content">
+    <div class="row-title" id="fcp-section">First Contentful Paint Time</div>
+    <div class="row">
+      <div class="content-row">
+        <div class="sub-row">
+          <div class="content-row">
+            <div class="canvas-column">
+              <div id="fcp-median-mean-metrics" class="metric-container"></div>
+              <canvas id="fcp-median-mean-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="sub-row">
+          <div class="content-row">
+            <div class="canvas-column">
+              <div id="fcp-p95-p99-metrics" class="metric-container"></div>
+              <canvas id="fcp-p95-p99-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row-title" id="lcp-section">Largest Contentful Paint Time</div>
+    <div class="row">
+      <div class="content-row">
+        <div class="sub-row">
+          <div class="content-row">
+            <div class="canvas-column">
+              <div id="lcp-median-mean-metrics" class="metric-container"></div>
+              <canvas id="lcp-median-mean-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="sub-row">
+          <div class="content-row">
+            <div class="canvas-column">
+              <div id="lcp-p95-p99-metrics" class="metric-container"></div>
+              <canvas id="lcp-p95-p99-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row-title" id="load-section">Pageload Time</div>
+    <div class="row">
+      <div class="content-row">
+        <div class="sub-row">
+          <div class="content-row">
+            <div class="canvas-column">
+              <div id="load-median-mean-metrics" class="metric-container"></div>
+              <canvas id="load-median-mean-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="sub-row">
+          <div class="content-row">
+            <div class="canvas-column">
+              <div id="load-p95-p99-metrics" class="metric-container"></div>
+              <canvas id="load-p95-p99-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row-title" id="response-section">Response Time</div>
+    <div class="row">
+      <div class="content-row">
+        <div class="sub-row">
+          <div class="content-row">
+            <div class="canvas-column">
+              <div id="response-median-mean-metrics" class="metric-container"></div>
+              <canvas id="response-median-mean-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="sub-row">
+          <div class="content-row">
+            <div class="canvas-column">
+              <div id="response-p95-p99-metrics" class="metric-container"></div>
+              <canvas id="response-p95-p99-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
